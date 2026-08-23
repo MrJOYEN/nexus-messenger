@@ -22,6 +22,7 @@ const { SERVICE_DEFAULTS, CHROME_UA } = require('./services');
 const { CATALOG } = require('./catalog');
 const { SVG_SCORE, sniffMime, iconWidth, decodeDataUrl } = require('./images');
 const { volumePatch } = require('./audio');
+const dnd = require('./dnd');
 const catalogIcons = require('./catalog-icons');
 const i18n = require('./i18n');
 const { t } = i18n;
@@ -98,6 +99,9 @@ const store = new Store({
     order: [],
     // id -> true : services dont les notifications sont coupees.
     muted: {},
+    // Ne pas deranger global : until 0 = inactif, -1 = jusqu'a desactivation,
+    // sinon timestamp ms. choice = option cochee dans les menus (voir dnd.js).
+    dnd: { until: 0, choice: 'off' },
     // id -> 0..100 : volume par service. Absent = 100, aucun gain applique.
     volumes: {},
     // Volume general, applique par-dessus celui de chaque service.
@@ -187,6 +191,14 @@ function orderedServices() {
 
 function isMuted(id) {
   return Boolean(store.get('muted')?.[id]);
+}
+
+function dndUntil() {
+  return Number(store.get('dnd')?.until) || 0;
+}
+
+function dndActive() {
+  return dnd.isActive(dndUntil(), Date.now());
 }
 
 function slugify(text) {
@@ -291,7 +303,7 @@ function getServiceSession(service) {
   applySessionUserAgent(service);
 
   const allows = (permission) => {
-    if (permission === 'notifications' && isMuted(id)) return false;
+    if (permission === 'notifications' && (isMuted(id) || dndActive())) return false;
     return ALLOWED_PERMISSIONS.has(permission);
   };
 
@@ -579,7 +591,10 @@ const notificationPatch = (muted) => `(() => {
 })()`;
 
 function applyMuteState(entry) {
-  const muted = isMuted(entry.service.id);
+  // Le "ne pas deranger" global emprunte exactement les trois voies du mute par
+  // service : memes patchs, meme coupure audio, sans toucher a l'etat stocke de
+  // chaque service — a la desactivation, chacun retrouve son reglage.
+  const muted = isMuted(entry.service.id) || dndActive();
 
   // Troisieme voie, la plus sournoise : les webapps jouent leur propre son
   // depuis la page (le "ding" de WhatsApp), sans passer par l'API Notification.
@@ -606,6 +621,102 @@ function setMuted(id, muted) {
   // La pastille de la tuile montre aussi la coupure : sans cette diffusion,
   // elle resterait sur l'etat d'avant apres un basculement depuis le menu.
   send('hub:volume', { id, value: volumeOf(id), muted });
+}
+
+// ---------------------------------------------------------------------------
+// Ne pas deranger
+//
+// Un seul interrupteur au-dessus des coupures par service : tant qu'il est
+// actif, applyMuteState traite chaque vue comme muette. Les compteurs de
+// non-lus, eux, continuent de vivre — on silence, on ne cache pas.
+// ---------------------------------------------------------------------------
+
+let dndTimer = null;
+
+function dndState() {
+  return { active: dndActive(), until: dndUntil() };
+}
+
+/**
+ * (Re)arme le reveil sur l'echeance. Les timers Node comptent en temps
+ * monotone : une mise en veille les fige, d'ou le rappel depuis
+ * powerMonitor.resume — au reveil de la machine, une echeance depassee
+ * s'applique tout de suite au lieu d'attendre la fin du decompte.
+ */
+function syncDndTimer() {
+  clearTimeout(dndTimer);
+  dndTimer = null;
+
+  const until = dndUntil();
+  if (until <= 0) return; // inactif ou indefini : rien a reveiller
+
+  const remaining = until - Date.now();
+  if (remaining <= 0) {
+    setDnd('off', 'echeance atteinte');
+    return;
+  }
+
+  dndTimer = setTimeout(syncDndTimer, Math.min(remaining, 2 ** 31 - 1));
+}
+
+function setDnd(choice, origin) {
+  const until = dnd.computeUntil(choice, Date.now());
+  store.set('dnd', { until, choice: until === 0 ? 'off' : choice });
+
+  const state = until === 0 ? 'inactif' : until === -1 ? 'actif' : `actif jusqu'a ${new Date(until).toLocaleTimeString()}`;
+  log('dnd', `${state} (${origin})`);
+
+  for (const entry of views.values()) applyMuteState(entry);
+  syncDndTimer();
+
+  // L'etat se lit partout ou il se regle : menus, tray et sidebar.
+  createApplicationMenu();
+  refreshTrayMenu();
+  refreshTrayTooltip();
+  send('hub:dnd', dndState());
+}
+
+/** Sous-menu commun au menu Fichier, au tray et au bouton de la sidebar. */
+function dndMenuTemplate() {
+  const active = dndActive();
+  const choice = active ? store.get('dnd')?.choice : 'off';
+  const until = dndUntil();
+
+  const option = (key, label, accelerator) => ({
+    label,
+    type: 'radio',
+    checked: choice === key,
+    ...(accelerator ? { accelerator, registerAccelerator: false } : {}),
+    click: () => setDnd(key, 'menu'),
+  });
+
+  return [
+    // L'echeance en toutes lettres : les radios disent la duree choisie, pas
+    // l'heure a laquelle elle tombe.
+    ...(until > 0
+      ? [
+          {
+            label: t('dnd.activeUntil', {
+              time: new Date(until).toLocaleTimeString(i18n.current(), {
+                hour: '2-digit',
+                minute: '2-digit',
+              }),
+            }),
+            enabled: false,
+          },
+          { type: 'separator' },
+        ]
+      : []),
+    // Les cinq radios doivent rester contigues : un separateur couperait le
+    // groupe en deux, et Electron coche d'office le premier element de tout
+    // groupe ou rien n'est coche — "Off" et une duree paraissaient coches
+    // en meme temps.
+    option('off', t('dnd.off')),
+    option('30', t('dnd.30')),
+    option('60', t('dnd.60')),
+    option('morning', t('dnd.morning')),
+    option('on', t('dnd.on'), 'CommandOrControl+D'),
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -1329,6 +1440,14 @@ function handleShortcut(event, input) {
     return;
   }
 
+  if (key === 'd' && !input.shift) {
+    event.preventDefault();
+    // Bascule brute : actif (peu importe la duree) -> inactif, inactif ->
+    // jusqu'a desactivation. Les durees fines vivent dans les menus.
+    setDnd(dndActive() ? 'off' : 'on', 'raccourci');
+    return;
+  }
+
   if (key === 'l' && !input.shift) {
     event.preventDefault();
     lockApp('raccourci'); // sans code defini, ne fait rien
@@ -1380,6 +1499,10 @@ function refreshTrayMenu() {
     })),
     { type: 'separator' },
     {
+      label: dndActive() ? t('dnd.menuOn') : t('dnd.menu'),
+      submenu: dndMenuTemplate(),
+    },
+    {
       label: t('tray.toggle'),
       click: () => (mainWindow?.isVisible() ? mainWindow.hide() : showWindow()),
     },
@@ -1404,7 +1527,8 @@ function refreshTrayMenu() {
 function refreshTrayTooltip() {
   if (!tray) return;
   const total = [...views.values()].reduce((sum, entry) => sum + Math.max(0, entry.badge), 0);
-  tray.setToolTip(total > 0 ? t('tray.unread', { count: total }) : 'Nexus');
+  const base = total > 0 ? t('tray.unread', { count: total }) : 'Nexus';
+  tray.setToolTip(dndActive() ? `${base} — ${t('dnd.menu')}` : base);
 }
 
 // ---------------------------------------------------------------------------
@@ -1698,6 +1822,13 @@ function createApplicationMenu() {
               })),
             },
           ],
+        },
+        { type: 'separator' },
+        {
+          // "(actif)" dans le libelle : un sous-menu ne porte pas de coche, et
+          // c'est la seule trace de l'etat une fois le menu referme.
+          label: dndActive() ? t('dnd.menuOn') : t('dnd.menu'),
+          submenu: dndMenuTemplate(),
         },
         { type: 'separator' },
         { label: t('menu.file.hide'), click: () => mainWindow?.hide() },
@@ -2193,6 +2324,7 @@ ipcMain.handle('hub:bootstrap', () => ({
   catalogIcons: catalogIcons.known(),
   update: pendingUpdate ? { state: 'ready', version: pendingUpdate } : null,
   masterVolume: masterVolume(),
+  dnd: dndState(),
   // Base servant a composer l'icone du tray avec le compteur par-dessus.
   trayBase: nativeImage.createFromPath(ICON_PATH).resize({ width: 64, height: 64 }).toDataURL(),
 }));
@@ -2202,6 +2334,11 @@ ipcMain.on('hub:set-volume', (_e, { id, value } = {}) => {
 });
 
 ipcMain.on('hub:set-master-volume', (_e, value) => setMasterVolume(value));
+
+// Menu natif du bouton lune : memes options que le menu Fichier et le tray.
+ipcMain.on('hub:dnd-menu', () => {
+  Menu.buildFromTemplate(dndMenuTemplate()).popup({ window: mainWindow });
+});
 
 ipcMain.handle('hub:service-save', (_e, draft) => saveService(draft || {}));
 ipcMain.handle('hub:service-delete', (_e, id) => deleteService(id));
@@ -2611,6 +2748,12 @@ app.whenReady().then(() => {
   };
   powerMonitor.on('lock-screen', lockOnSuspend);
   powerMonitor.on('suspend', lockOnSuspend);
+
+  // Ne pas deranger : reprend l'echeance laissee par la session precedente
+  // (une echeance passee se desactive au premier sync), et la re-verifie au
+  // reveil de la machine, les timers ayant dormi avec elle.
+  syncDndTimer();
+  powerMonitor.on('resume', syncDndTimer);
   setInterval(() => {
     const minutes = Number(store.get('lock')?.idleMinutes) || 0;
     if (minutes > 0 && powerMonitor.getSystemIdleTime() >= minutes * 60) {

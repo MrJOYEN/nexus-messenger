@@ -11,6 +11,7 @@ const overlayMessage = document.getElementById('overlay-message');
 const overlayRetry = document.getElementById('overlay-retry');
 const addButton = document.getElementById('add-btn');
 const updateButton = document.getElementById('update-btn');
+const dndButton = document.getElementById('dnd-btn');
 
 const modal = document.getElementById('modal');
 const mixer = document.getElementById('mixer');
@@ -58,6 +59,8 @@ let catalogIcons = {};
 let strings = {};
 /** Volume general, module par-dessus celui de chaque service. */
 let masterVolume = 100;
+/** Ne pas deranger : { active, until } — until 0 = inactif, -1 = indefini. */
+let dndState = { active: false, until: 0 };
 
 // ---------------------------------------------------------------------------
 // Traduction
@@ -445,28 +448,60 @@ function drawOverlayBadge(total, dotOnly) {
  * n'a plus de bouton dans la barre des taches — donc plus de pastille : le tray
  * prend le relais.
  */
-function drawTrayIcon(total, dotOnly) {
+/** Croissant de lune, pose en haut a gauche (le compteur vit en bas a droite). */
+function drawMoon(ctx, cx, cy, radius) {
+  ctx.fillStyle = '#8e4ec6';
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Croissant : un disque blanc entaille par un second disque de la couleur du
+  // fond — plus net a 16px que n'importe quel trace de lune.
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius * 0.62, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#8e4ec6';
+  ctx.beginPath();
+  ctx.arc(cx + radius * 0.3, cy - radius * 0.3, radius * 0.56, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/** Lune seule sur la barre des taches : "silencieux, mais rien de non lu". */
+function drawOverlayMoon() {
+  const ctx = overlayCanvas.getContext('2d');
+  ctx.clearRect(0, 0, 32, 32);
+  drawMoon(ctx, 16, 16, 15);
+  return overlayCanvas.toDataURL('image/png');
+}
+
+function drawTrayIcon(total, dot) {
   const ctx = trayCanvas.getContext('2d');
   ctx.clearRect(0, 0, 64, 64);
   ctx.drawImage(trayBase, 0, 0, 64, 64);
 
-  // L'icone du tray est affichee en 16px : la pastille doit etre grosse et
-  // franche, sinon elle disparait au redimensionnement.
-  const radius = dotOnly ? 13 : 21;
-  ctx.fillStyle = '#e5484d';
-  ctx.beginPath();
-  ctx.arc(64 - radius, 64 - radius, radius, 0, Math.PI * 2);
-  ctx.fill();
+  if (total > 0 || dot) {
+    // L'icone du tray est affichee en 16px : la pastille doit etre grosse et
+    // franche, sinon elle disparait au redimensionnement.
+    const dotOnly = total === 0;
+    const radius = dotOnly ? 13 : 21;
+    ctx.fillStyle = '#e5484d';
+    ctx.beginPath();
+    ctx.arc(64 - radius, 64 - radius, radius, 0, Math.PI * 2);
+    ctx.fill();
 
-  if (!dotOnly) {
-    // Au-dela de 9, le chiffre devient illisible une fois reduit a 16px.
-    const label = total > 9 ? '9+' : String(total);
-    ctx.fillStyle = '#ffffff';
-    ctx.font = `700 ${label.length === 1 ? 30 : 24}px "Segoe UI", sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(label, 64 - radius, 64 - radius + 1);
+    if (!dotOnly) {
+      // Au-dela de 9, le chiffre devient illisible une fois reduit a 16px.
+      const label = total > 9 ? '9+' : String(total);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `700 ${label.length === 1 ? 30 : 24}px "Segoe UI", sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, 64 - radius, 64 - radius + 1);
+    }
   }
+
+  if (dndState.active) drawMoon(ctx, 14, 14, 14);
 
   return trayCanvas.toDataURL('image/png');
 }
@@ -480,15 +515,36 @@ function updateCounters() {
     else if (item.badge === -1) dot = true; // non-lus sans compteur
   }
 
-  if (!total && !dot) {
-    window.hub.setOverlayBadge(null, '');
-    if (trayBaseReady) window.hub.setTrayIcon(null);
-    return;
+  const unread = total > 0 || dot;
+
+  if (trayBaseReady) {
+    // Compteur, lune, ou les deux ; sans rien a montrer, fichier d'origine.
+    window.hub.setTrayIcon(unread || dndState.active ? drawTrayIcon(total, dot) : null);
   }
 
-  const description = total > 0 ? t('sidebar.unread', { count: total }) : t('sidebar.unreadDot');
-  window.hub.setOverlayBadge(drawOverlayBadge(total, total === 0), description);
-  if (trayBaseReady) window.hub.setTrayIcon(drawTrayIcon(total, total === 0));
+  if (unread) {
+    const description = total > 0 ? t('sidebar.unread', { count: total }) : t('sidebar.unreadDot');
+    window.hub.setOverlayBadge(drawOverlayBadge(total, total === 0), description);
+  } else if (dndState.active) {
+    window.hub.setOverlayBadge(drawOverlayMoon(), t('sidebar.dndOn'));
+  } else {
+    window.hub.setOverlayBadge(null, '');
+  }
+}
+
+/** Le bouton lune porte l'etat : allume quand le mode est actif. */
+function refreshDndButton() {
+  if (!dndButton) return;
+  dndButton.classList.toggle('on', dndState.active);
+
+  if (!dndState.active) dndButton.title = t('sidebar.dnd');
+  else if (dndState.until > 0) {
+    const time = new Date(dndState.until).toLocaleTimeString(document.documentElement.lang, {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    dndButton.title = t('sidebar.dndUntil', { time });
+  } else dndButton.title = t('sidebar.dndOn');
 }
 
 // ---------------------------------------------------------------------------
@@ -1321,6 +1377,9 @@ function startOnboarding() {
   if (boot.splitId) setSplit(boot.splitId);
   showUpdate(boot.update);
   masterVolume = Number.isFinite(boot.masterVolume) ? boot.masterVolume : 100;
+  if (boot.dnd) dndState = boot.dnd;
+  refreshDndButton();
+  updateCounters(); // la lune du tray depend de l'etat recu
   if (boot.locked) setLocked(true);
   if (boot.onboarding) startOnboarding();
 
@@ -1347,6 +1406,12 @@ function startOnboarding() {
     if (item) openForm(item.service);
   });
   window.hub.onNewService(() => openForm(null));
+  dndButton.addEventListener('click', () => window.hub.dndMenu());
+  window.hub.onDnd((state) => {
+    dndState = state;
+    refreshDndButton();
+    updateCounters();
+  });
   window.hub.onLock(({ locked }) => setLocked(locked));
   window.hub.onLockSetup(({ mode }) => openLockSetup(mode));
   window.hub.onUpdate(showUpdate);
@@ -1356,6 +1421,7 @@ function startOnboarding() {
     document.documentElement.lang = language || 'en';
     applyTranslations();
     refreshShortcutLabels();
+    refreshDndButton(); // le title du bouton lune se reformule dans la nouvelle langue
     if (!modal.classList.contains('hidden')) renderCatalog(searchInput.value);
     if (editingId) refreshProtectButton();
     if (activeId) refreshOverlay();

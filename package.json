@@ -1,7 +1,7 @@
 {
   "name": "nexus",
   "productName": "Nexus",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "All your web apps in one window, each account in its own isolated session.",
   "author": "Mehdi Joyen",
   "license": "MIT",

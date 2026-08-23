@@ -37,6 +37,8 @@ Discord accounts and anything else. They never sign each other out.
 
 - Isolated session per service: cookies, storage and logins never mix
 - Native Windows notifications, with per-service mute (sound included)
+- Do not disturb: silence everything for 30 minutes, 1 hour, until tomorrow
+  morning or until you turn it off — unread badges keep counting
 - A volume level per service, with a mixer panel and a master level. Scroll over
   an icon to adjust it; the sidebar shows which services are turned down
 - Unread badges in the sidebar, on the taskbar icon and on the tray icon
@@ -71,6 +73,7 @@ remove it.
 | `Ctrl+N` | Add a service |
 | `Ctrl+R` | Reload the active service |
 | `Ctrl+M` | Open the volume mixer |
+| `Ctrl+D` | Toggle do not disturb |
 | `Ctrl+L` | Lock Nexus (once a code is set) |
 | `Ctrl+Q` | Quit (the close button only hides to the tray) |
 | `Alt` | Show the menu bar |

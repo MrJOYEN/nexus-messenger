@@ -19,6 +19,13 @@
         <button id="update-btn" class="action update hidden" type="button" title="Update">
           <span aria-hidden="true">↑</span>
         </button>
+        <!-- Ne pas deranger : le clic ouvre un menu natif avec les durees.
+             Le bouton porte aussi l'etat (lune allumee quand actif). -->
+        <button id="dnd-btn" class="action" type="button" title="Do not disturb" data-i18n-title="sidebar.dnd">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20.4 14.3A8.5 8.5 0 0 1 9.7 3.6a8.5 8.5 0 1 0 10.7 10.7z" />
+          </svg>
+        </button>
         <!-- Chemin visible vers le melangeur : Ctrl+M et le sous-menu du clic
              droit y menent aussi, mais aucun des deux ne se decouvre seul. -->
         <button id="mixer-btn" class="action" type="button" title="Volume mixer" data-i18n-title="sidebar.mixer">

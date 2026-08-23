@@ -35,6 +35,12 @@ contextBridge.exposeInMainWorld('hub', {
   /** Ouverture du melangeur, demandee depuis un menu natif. */
   onOpenMixer: (callback) => on('hub:open-mixer', callback),
 
+  /** Menu natif "Ne pas deranger" (durees), ouvert par le bouton lune. */
+  dndMenu: () => ipcRenderer.send('hub:dnd-menu'),
+
+  /** { active, until } - le mode "Ne pas deranger" a bascule ou expire. */
+  onDnd: (callback) => on('hub:dnd', callback),
+
   /** Cree ou met a jour un service -> { ok } ou { error }. */
   saveService: (draft) => ipcRenderer.invoke('hub:service-save', draft),
 

@@ -178,5 +178,16 @@
   "ctx.more": "Plus",
   "sidebar.mixer": "Mélangeur de volume",
   "tile.volume": "Volume à {value} %",
-  "tile.muted": "Son coupé"
+  "tile.muted": "Son coupé",
+  "dnd.menu": "Ne pas déranger",
+  "dnd.menuOn": "Ne pas déranger (actif)",
+  "dnd.activeUntil": "Actif jusqu'à {time}",
+  "dnd.off": "Désactivé",
+  "dnd.30": "Pendant 30 minutes",
+  "dnd.60": "Pendant 1 heure",
+  "dnd.morning": "Jusqu'à demain matin",
+  "dnd.on": "Jusqu'à désactivation",
+  "sidebar.dnd": "Ne pas déranger",
+  "sidebar.dndOn": "Ne pas déranger — actif",
+  "sidebar.dndUntil": "Ne pas déranger — jusqu'à {time}"
 }

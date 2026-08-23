@@ -178,5 +178,16 @@
   "ctx.more": "Más",
   "sidebar.mixer": "Mezclador de volumen",
   "tile.volume": "Volumen al {value} %",
-  "tile.muted": "Sonido silenciado"
+  "tile.muted": "Sonido silenciado",
+  "dnd.menu": "No molestar",
+  "dnd.menuOn": "No molestar (activo)",
+  "dnd.activeUntil": "Activo hasta las {time}",
+  "dnd.off": "Desactivado",
+  "dnd.30": "Durante 30 minutos",
+  "dnd.60": "Durante 1 hora",
+  "dnd.morning": "Hasta mañana por la mañana",
+  "dnd.on": "Hasta que lo desactive",
+  "sidebar.dnd": "No molestar",
+  "sidebar.dndOn": "No molestar — activo",
+  "sidebar.dndUntil": "No molestar — hasta las {time}"
 }

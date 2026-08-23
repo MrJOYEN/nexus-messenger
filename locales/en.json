@@ -178,5 +178,16 @@
   "ctx.more": "More",
   "sidebar.mixer": "Volume mixer",
   "tile.volume": "Volume at {value} %",
-  "tile.muted": "Sound muted"
+  "tile.muted": "Sound muted",
+  "dnd.menu": "Do not disturb",
+  "dnd.menuOn": "Do not disturb (on)",
+  "dnd.activeUntil": "On until {time}",
+  "dnd.off": "Off",
+  "dnd.30": "For 30 minutes",
+  "dnd.60": "For 1 hour",
+  "dnd.morning": "Until tomorrow morning",
+  "dnd.on": "Until I turn it off",
+  "sidebar.dnd": "Do not disturb",
+  "sidebar.dndOn": "Do not disturb — on",
+  "sidebar.dndUntil": "Do not disturb — until {time}"
 }
