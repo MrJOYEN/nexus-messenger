@@ -1,0 +1,54 @@
+# Configuration Dependabot.
+#
+# Sans ce fichier, seules les mises a jour de securite tournaient, declenchees
+# par les alertes : une PR par advisory, au moment ou elle sort. Le lot xmldom
+# du 2026-09-10 — dix advisories en une demi-heure — a montre la limite du
+# procede, et c'est lui qui a motive ce fichier.
+#
+# Le declarer active aussi les mises a jour de version, qui n'existaient pas
+# jusqu'ici : les dependances ne montaient qu'a la faveur d'une faille. Le
+# volume est contenu par le groupage ci-dessous, et l'interet est de ne plus
+# decouvrir une dependance vieille de dix mois le jour ou elle est signalee.
+#
+# A noter : ce fichier ne change rien au nombre d'emails d'alerte. Une alerte
+# de securite part des sa publication, independamment du calendrier. Seul le
+# nombre de PR est concerne. Le reglage des notifications se fait cote GitHub.
+
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Paris
+    open-pull-requests-limit: 5
+
+    groups:
+      # Les correctifs de securite arrivent ensemble plutot qu'un par advisory.
+      # Le lot xmldom aurait donne une PR au lieu de deux, et surtout une seule
+      # a relire le jour ou dix advisories tombent d'un coup.
+      #
+      # Le groupage n'attend pas le lundi : une mise a jour de securite reste
+      # declenchee par l'alerte. `schedule` ne gouverne que les montees de
+      # routine juste en dessous.
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+      # Patch et mineures confondues, tous paquets, dans une PR hebdomadaire.
+      routine:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
+        patterns:
+          - "*"
+
+    # Les majeures restent volontairement hors groupe : une PR chacune. Un
+    # Electron majeur porte des ruptures d'API et une nouvelle base Chromium,
+    # et electron-builder majeur peut changer l'empaquetage MSIX — deux sujets
+    # qui se relisent seuls, pas noyes dans un lot hebdomadaire.
