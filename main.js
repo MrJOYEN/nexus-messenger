@@ -810,6 +810,12 @@ function hostOf(url) {
   }
 }
 
+/** webContents vivant d'un service, ou null s'il dort ou que sa vue est morte. */
+function liveContents(id) {
+  const wc = views.get(id)?.view.webContents;
+  return wc && !wc.isDestroyed() ? wc : null;
+}
+
 function isAuthPopup(url) {
   const host = hostOf(url);
   return host ? AUTH_HOST_PATTERNS.some((re) => re.test(host)) : false;
@@ -896,6 +902,8 @@ function createServiceView(service) {
     setStatus(entry, 'error', `Process renderer termine : ${details.reason}`);
   });
 
+  wc.once('destroyed', () => handleViewDestroyed(entry));
+
   // Detection des notifications non lues : les webapps mettent le compteur dans
   // le titre de l'onglet -> "(3) WhatsApp", "(1) Discord".
   wc.on('page-title-updated', (_e, title) => {
@@ -944,11 +952,14 @@ function createServiceView(service) {
 
     log('popup', `${service.id} : fenetre ouverte (${url})`);
 
+    // La vue qui a ouvert la popup a pu etre remplacee pendant le login (page
+    // fermee par le site, veille) : on vise celle qui porte le service
+    // maintenant, pas celle capturee a l'ouverture.
     child.webContents.on('did-navigate', (_e, navigatedUrl) => {
       if (absorbed || hostOf(navigatedUrl) !== serviceHost) return;
       absorbed = true;
       log('popup', `${service.id} : flux termine -> retour dans la fenetre principale`);
-      wc.loadURL(navigatedUrl);
+      liveContents(service.id)?.loadURL(navigatedUrl);
       setImmediate(() => !child.isDestroyed() && child.close());
     });
 
@@ -957,7 +968,7 @@ function createServiceView(service) {
       // manuelle) : on recharge le service pour prendre en compte la session.
       if (absorbed) return;
       log('popup', `${service.id} : fermee -> rechargement du service`);
-      if (!wc.isDestroyed()) wc.reload();
+      liveContents(service.id)?.reload();
     });
   });
 
@@ -1052,12 +1063,12 @@ function hibernateService(id, reason) {
   // la zone deviendrait vide.
   if (id === activeId || id === splitId) return;
 
-  clearTimeout(entry.timer);
-  clearTimeout(entry.hibernateTimer);
+  disposeView(entry);
+  markHibernated(id, reason);
+}
 
-  mainWindow?.contentView.removeChildView(entry.view);
-  entry.view.webContents.close();
-  views.delete(id);
+/** Retient un service comme endormi : il se rechargera au prochain clic. */
+function markHibernated(id, reason) {
   hibernated.add(id);
   unlockedIds.delete(id); // au reveil, un service protege redemande son code
 
@@ -1065,6 +1076,73 @@ function hibernateService(id, reason) {
   send('hub:status', { id, status: 'hibernated' });
   send('hub:badge', { id, count: 0 });
   refreshTrayTooltip();
+}
+
+/**
+ * Ferme la vue d'un service et l'oublie.
+ *
+ * Le drapeau `disposing` previent le gestionnaire 'destroyed' que la fermeture
+ * vient de nous : sans lui, il croirait que la page s'est fermee toute seule.
+ */
+function disposeView(entry) {
+  entry.disposing = true;
+  clearTimeout(entry.timer);
+  clearTimeout(entry.hibernateTimer);
+
+  mainWindow?.contentView.removeChildView(entry.view);
+  const wc = entry.view.webContents;
+  if (wc && !wc.isDestroyed()) wc.close();
+  views.delete(entry.service.id);
+}
+
+/**
+ * Une page peut se fermer elle-meme : window.close() detruit le webContents
+ * d'une WebContentsView. Chromium l'accepte des que l'historique ne compte
+ * qu'une entree, ce qui est le cas apres la redirection d'une session expiree
+ * vers une page de connexion (Google Agenda, notamment).
+ *
+ * Sans ce rattrapage, l'entree restait dans `views` avec une vue morte : le
+ * moindre acces a `view.webContents` levait une exception, et le main et la
+ * sidebar ne s'accordaient plus sur le service affiche.
+ */
+function handleViewDestroyed(entry) {
+  const id = entry.service.id;
+
+  // Fermeture voulue (veille, suppression) ou entree deja remplacee.
+  if (entry.disposing || views.get(id) !== entry) return;
+  // En sortie d'application, les vues meurent avec la fenetre.
+  if (isQuitting || !mainWindow || mainWindow.isDestroyed()) return;
+
+  log('view', `${id} : la page a ferme sa vue (window.close)`);
+  disposeView(entry);
+
+  // Hors de l'evenement de destruction : on ne recree pas une vue pendant
+  // qu'Electron demonte encore la precedente.
+  setImmediate(() => {
+    if (views.has(id) || isQuitting || !mainWindow || mainWindow.isDestroyed()) return;
+
+    const service = getService(id);
+    if (!service) return;
+
+    // Un service en arriere-plan s'endort, comme apres une veille.
+    if (id !== activeId && id !== splitId) {
+      markHibernated(id, 'page fermee par le site');
+      return;
+    }
+
+    // Un service affiche se recharge sur place : la zone ne reste pas vide.
+    // Le compteur de l'ancienne page ne vaut plus rien.
+    send('hub:badge', { id, count: 0 });
+    const fresh = createServiceView(service);
+    clearTimeout(fresh.hibernateTimer);
+    applyViewVisibility();
+    layoutViews();
+    refreshTrayTooltip();
+
+    if (id === activeId && !needsCode(id) && mainWindow.isFocused()) {
+      fresh.view.webContents.focus();
+    }
+  });
 }
 
 /**
@@ -2253,13 +2331,7 @@ async function deleteService(id) {
   // La vue doit mourir avant la config : sinon elle continue de tourner sans
   // service correspondant.
   const entry = views.get(id);
-  if (entry) {
-    clearTimeout(entry.timer);
-    clearTimeout(entry.hibernateTimer);
-    mainWindow?.contentView.removeChildView(entry.view);
-    entry.view.webContents.close();
-    views.delete(id);
-  }
+  if (entry) disposeView(entry);
   hibernated.delete(id);
   iconCache.delete(id);
 
