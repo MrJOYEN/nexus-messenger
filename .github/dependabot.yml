@@ -52,3 +52,15 @@ updates:
     # Electron majeur porte des ruptures d'API et une nouvelle base Chromium,
     # et electron-builder majeur peut changer l'empaquetage MSIX — deux sujets
     # qui se relisent seuls, pas noyes dans un lot hebdomadaire.
+
+    ignore:
+      # electron-store est epingle en 8.2.0, la derniere version CommonJS. A
+      # partir de la 9 le paquet n'existe plus qu'en ESM (et la 12 exige Node
+      # 22), alors que main.js le charge par require() : une majeure n'est pas
+      # une montee de version mais une migration, qui se decide et se prepare
+      # a part. Les correctifs de sa chaine (conf, ajv, fast-uri) arrivent par
+      # le lockfile et ne sont pas concernes. Une alerte de securite visant
+      # electron-store lui-meme continuerait de partir : seule la PR disparait.
+      - dependency-name: electron-store
+        update-types:
+          - version-update:semver-major
